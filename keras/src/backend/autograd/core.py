@@ -3,7 +3,7 @@ import contextlib
 import functools
 import warnings
 
-import numpy as np
+import autograd.numpy as np
 
 from keras.src import tree
 from keras.src.backend.common import KerasVariable

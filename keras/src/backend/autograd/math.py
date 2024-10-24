@@ -1,4 +1,4 @@
-import numpy as np
+import autograd.numpy as np
 
 from keras.src.backend import standardize_dtype
 from keras.src.backend.common import dtypes

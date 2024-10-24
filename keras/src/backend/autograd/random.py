@@ -1,4 +1,4 @@
-import numpy as np
+import autograd.numpy as np
 
 from keras.src.backend.config import floatx
 from keras.src.backend.numpy.nn import softmax

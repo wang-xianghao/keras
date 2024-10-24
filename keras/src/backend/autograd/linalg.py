@@ -1,4 +1,4 @@
-import numpy as np
+import autograd.numpy as np
 import scipy.linalg as sl
 
 from keras.src.backend import standardize_dtype
