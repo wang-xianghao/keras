@@ -1,2 +1,2 @@
-class NumpyLayer:
+class AutogradLayer:
     pass

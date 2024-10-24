@@ -12,7 +12,7 @@ from keras.src.trainers.epoch_iterator import EpochIterator
 from keras.src.utils import traceback_utils
 
 
-class NumpyTrainer(base_trainer.Trainer):
+class AutogradTrainer(base_trainer.Trainer):
     def __init__(self):
         super().__init__()
         self.test_function = None
