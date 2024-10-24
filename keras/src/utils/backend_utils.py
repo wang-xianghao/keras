@@ -60,10 +60,10 @@ class DynamicBackend:
         self._backend = backend or backend_module.backend()
 
     def set_backend(self, backend):
-        if backend not in ("tensorflow", "jax", "torch", "numpy"):
+        if backend not in ("tensorflow", "jax", "torch", "numpy", "autograd"):
             raise ValueError(
-                "Available backends are ('tensorflow', 'jax', 'torch' and "
-                f"'numpy'). Received: backend={backend}"
+                "Available backends are ('tensorflow', 'jax', 'torch' "
+                f"'numpy' and 'autograd'). Received: backend={backend}"
             )
         self._backend = backend
 
@@ -92,6 +92,9 @@ class DynamicBackend:
                     "Currently, we cannot dynamically import the numpy backend "
                     "because it would disrupt the namespace of the import."
                 )
+        if self.__backend == "autograd":
+            if backend_module.backend() == "autograd":
+                return getattr(backend_module, name)
 
 
 @keras_export("keras.config.set_backend")

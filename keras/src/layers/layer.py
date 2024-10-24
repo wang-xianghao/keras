@@ -52,6 +52,8 @@ elif backend.backend() == "torch":
     from keras.src.backend.torch.layer import TorchLayer as BackendLayer
 elif backend.backend() == "numpy":
     from keras.src.backend.numpy.layer import NumpyLayer as BackendLayer
+elif backend.backend() == "autograd":
+    from keras.src.backend.autograd.layer import AutogradLayer as BackendLayer
 else:
     raise RuntimeError(
         f"Backend '{backend.backend()}' must implement a layer mixin class."
@@ -1520,9 +1522,9 @@ class Layer(BackendLayer, Operation, KerasSaveable):
         flat_masks = tree.flatten(output_masks)
         for tensor, mask in zip(flat_outputs, flat_masks):
             if backend.get_keras_mask(tensor) is None and mask is not None:
-                if backend.backend() == "numpy":
+                if backend.backend() in ["numpy", "autograd"] :
                     warnings.warn(
-                        "The NumPy backend does not support masking at this"
+                        "The NumPy and autograd backends do not support masking at this"
                         "time. Masks will be ignored."
                     )
                 else:
