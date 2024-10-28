@@ -5,8 +5,9 @@ from keras.src import callbacks as callbacks_module
 from keras.src import tree
 from keras.src.backend.common import standardize_dtype
 from keras.src.backend.common.keras_tensor import KerasTensor
-from keras.src.backend.numpy.core import is_tensor
+from keras.src.backend.autograd.core import is_tensor
 from keras.src.trainers import trainer as base_trainer
+from keras.src.trainers.data_adapters import array_slicing
 from keras.src.trainers.data_adapters import data_adapter_utils
 from keras.src.trainers.epoch_iterator import EpochIterator
 from keras.src.utils import traceback_utils
@@ -91,62 +92,6 @@ class AutogradTrainer(base_trainer.Trainer):
 
         self.predict_function = predict_step
 
-    def _symbolic_build(self, data_batch):
-        model_unbuilt = not all(layer.built for layer in self._flatten_layers())
-        compile_metrics_unbuilt = (
-            self._compile_metrics is not None
-            and not self._compile_metrics.built
-        )
-        compile_loss_unbuilt = (
-            self._compile_loss is not None and not self._compile_loss.built
-        )
-        if model_unbuilt or compile_metrics_unbuilt or compile_loss_unbuilt:
-            # Create symbolic tensors matching an input batch.
-
-            def to_symbolic_input(v):
-                if is_tensor(v):
-                    return KerasTensor(v.shape, standardize_dtype(v.dtype))
-                return v
-
-            data_batch = tree.map_structure(to_symbolic_input, data_batch)
-            (
-                x,
-                y,
-                sample_weight,
-            ) = data_adapter_utils.unpack_x_y_sample_weight(data_batch)
-            # Build all model state with `backend.compute_output_spec`.
-            try:
-                y_pred = backend.compute_output_spec(self, x)
-            except:
-                raise RuntimeError(
-                    "Unable to automatically build the model. "
-                    "Please build it yourself before calling "
-                    "fit/evaluate/predict. "
-                    "A model is 'built' when its variables have "
-                    "been created and its `self.built` attribute "
-                    "is True. Usually, calling the model on a batch "
-                    "of data is the right way to build it."
-                )
-            if compile_metrics_unbuilt:
-                # Build all metric state with `backend.compute_output_spec`.
-                backend.compute_output_spec(
-                    self.compute_metrics,
-                    x,
-                    y,
-                    y_pred,
-                    sample_weight=sample_weight,
-                )
-            if compile_loss_unbuilt:
-                # Build `CompileLoss` state with `backend.compute_output_spec`.
-                backend.compute_output_spec(
-                    self._compute_loss,
-                    x,
-                    y,
-                    y_pred,
-                    sample_weight=sample_weight,
-                )
-        self._post_build()
-
     def fit(
         self,
         x=None,
@@ -166,7 +111,58 @@ class AutogradTrainer(base_trainer.Trainer):
         validation_batch_size=None,
         validation_freq=1,
     ):
-        raise NotImplementedError("fit not implemented for NumPy backend.")
+        # raise NotImplementedError("fit not implemented for NumPy backend.")
+        self._assert_compile_called("fit")
+        # TODO: respect compiled trainable state
+        self._eval_epoch_iterator = None
+        if validation_split and validation_data is None:
+            # Create the validation data using the training data. Only supported
+            # for TF/numpy/jax arrays.
+            (
+                x,
+                y,
+                sample_weight
+            ), validation_data = array_slicing.train_validation_split(
+                (x, y, sample_weight), validation_split=validation_split
+            )
+            
+        if validation_data is not None:
+            (
+                val_x,
+                val_y,
+                val_sample_weight,
+            ) = data_adapter_utils.unpack_x_y_sample_weight(validation_data)
+        
+        # Create an iterator that yields batches for one epoch.
+        epoch_iterator = EpochIterator(
+            x=x,
+            y=y,
+            sample_weight=sample_weight,
+            batch_size=batch_size,
+            steps_per_epoch=steps_per_epoch,
+            shuffle=shuffle,
+            class_weight=class_weight,
+            steps_per_execution=self.steps_per_execution,
+        )
+        
+        self._symbolic_build(iterator=epoch_iterator)
+        epoch_iterator.reset()
+        
+        # Container that configures and calls callbacks.
+        if not isinstance(callbacks, callbacks_module.CallbackList):
+            callbacks = callbacks_module.CallbackList(
+                callbacks,
+                add_history=True,
+                add_progbar=verbose != 0,
+                verbose=verbose,
+                epochs=epochs,
+                steps=epoch_iterator.num_batches,
+                model=self,
+            )
+            
+        self.stop_training = False
+        
+        # TODO: make train function
 
     @traceback_utils.filter_traceback
     def predict(

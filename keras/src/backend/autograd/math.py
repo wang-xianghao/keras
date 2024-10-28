@@ -4,7 +4,7 @@ from keras.src.backend import standardize_dtype
 from keras.src.backend.common import dtypes
 from keras.src.backend.jax.math import fft as jax_fft
 from keras.src.backend.jax.math import fft2 as jax_fft2
-from keras.src.backend.numpy.core import convert_to_tensor
+from keras.src.backend.autograd.core import convert_to_tensor
 from keras.src.utils.module_utils import scipy
 
 
@@ -311,7 +311,7 @@ def norm(x, ord=None, axis=None, keepdims=False):
 
 
 def logdet(x):
-    from keras.src.backend.numpy.numpy import slogdet
+    from keras.src.backend.autograd.numpy import slogdet
 
     # In NumPy slogdet is more stable than `np.log(np.linalg.det(x))`. See
     # https://numpy.org/doc/stable/reference/generated/numpy.linalg.slogdet.html

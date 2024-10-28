@@ -5,7 +5,7 @@ from keras.src.backend import config
 from keras.src.backend import standardize_dtype
 from keras.src.backend.common import dtypes
 from keras.src.backend.common.backend_utils import standardize_axis_for_numpy
-from keras.src.backend.numpy.core import convert_to_tensor
+from keras.src.backend.autograd.core import convert_to_tensor
 
 
 def add(x1, x2):
