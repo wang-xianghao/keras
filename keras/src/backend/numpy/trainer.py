@@ -1,4 +1,4 @@
-import numpy as np
+import autograd.numpy as np
 
 from keras.src import backend
 from keras.src import callbacks as callbacks_module

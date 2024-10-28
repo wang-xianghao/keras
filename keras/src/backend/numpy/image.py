@@ -1,5 +1,5 @@
 import jax
-import numpy as np
+import autograd.numpy as np
 
 from keras.src import backend
 from keras.src.backend.numpy.core import convert_to_tensor

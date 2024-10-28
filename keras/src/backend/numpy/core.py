@@ -3,7 +3,8 @@ import contextlib
 import functools
 import warnings
 
-import numpy as np
+import autograd.numpy as np
+import numpy
 
 from keras.src import tree
 from keras.src.backend.common import KerasVariable
@@ -54,7 +55,7 @@ def convert_to_tensor(x, dtype=None, sparse=None):
 
 
 def convert_to_numpy(x):
-    return np.array(x)
+    return numpy.array(x)
 
 
 def is_tensor(x):
@@ -108,7 +109,7 @@ def compute_output_spec(fn, *args, **kwargs):
                     for i, e in enumerate(shape):
                         if e is None:
                             shape[i] = fill_value
-                return np.empty(
+                return numpy.empty(
                     shape=shape,
                     dtype=x.dtype,
                 )
