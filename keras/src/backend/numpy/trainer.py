@@ -2,6 +2,7 @@ import autograd.numpy as np
 
 from keras.src import backend
 from keras.src import callbacks as callbacks_module
+from keras.src import optimizers as optimizers_module
 from keras.src import tree
 from keras.src.backend.common import standardize_dtype
 from keras.src.backend.common.keras_tensor import KerasTensor
@@ -91,6 +92,40 @@ class NumpyTrainer(base_trainer.Trainer):
             predict_step = one_predict_step
 
         self.predict_function = predict_step
+    
+    
+    def train_step(self, data):
+        x, y, sample_weight = data_adapter_utils.unpack_x_y_sample_weight(data)
+        
+        # TODO: train step
+        
+        return None
+    
+    def make_train_function(self, force=False):
+        if self.train_function is not None and not force:
+            return self.train_function
+
+        def one_train_step(data):
+            data = data[0]
+            return self.train_step(data)
+        
+        def multi_train_step(data):
+            outputs = one_train_step(data[:1])
+            for single_step_data in data[1:]:
+                step_outputs = one_train_step([single_step_data])
+                outputs = tree.map_structure(
+                    lambda t1, t2: np.concatenate([t1, t2]),
+                    outputs,
+                    step_outputs,
+                )
+            return outputs
+        
+        if self.steps_per_execution > 1:
+            train_step = multi_train_step
+        else:
+            train_step = one_train_step
+            
+        self.train_function = train_step
 
     def fit(
         self,
@@ -159,9 +194,71 @@ class NumpyTrainer(base_trainer.Trainer):
                 model=self,
             )
             
+        self.make_train_function()        
         self.stop_training = False
+        training_logs = {}
+        callbacks.on_train_begin()
+        initial_epoch = self._initial_epoch or initial_epoch
+        for epoch in range(initial_epoch, epochs):
+            self.reset_metrics()
+            callbacks.on_epoch_begin(epoch)
+            with epoch_iterator.catch_stop_iteration():
+                for step, iterator in epoch_iterator:
+                    callbacks.on_train_batch_begin(step)
+                    logs = self.train_function(iterator)
+                    callbacks.on_train_batch_end(step, logs)
+                    if self.stop_training:
+                        break
+                    
+            # Override with model metrics instead of last step logs if needed.
+            epoch_logs = dict(self._get_metrics_result_or_logs(logs))
+            
+            # Run validation
+            if validation_data is not None and self._should_eval(
+                epoch, validation_freq
+            ):
+                # Create EpochIterator for evaluation and cache it.
+                if getattr(self, "_eval_epoch_iterator", None) is None:
+                    self._eval_epoch_iterator = EpochIterator(
+                        x=val_x,
+                        y=val_y,
+                        sample_weight=val_sample_weight,
+                        batch_size=validation_batch_size or batch_size,
+                        steps_per_execution=self.steps_per_execution,
+                        steps_per_epoch=validation_steps,
+                        shuffle=False,
+                    )
+                val_logs = self.evaluate(
+                    x=val_x,
+                    y=val_y,
+                    sample_weight=val_sample_weight,
+                    batch_size=validation_batch_size or batch_size,
+                    steps=validation_steps,
+                    callbacks=callbacks,
+                    return_dict=True,
+                    _use_cached_eval_dataset=True,
+                )
+                val_logs = {
+                    "val_" + name: val for name, val in val_logs.items()
+                }
+                epoch_logs.update(val_logs)
+            
+            callbacks.on_epoch_end()
+            training_logs = epoch_logs
+            if self.stop_training:
+                break
         
-        # TODO: make train function
+        if (
+            isinstance(self.optimizer, optimizers_module.Optimizer)
+            and epochs > 0
+        ):
+            self.optimizer.finalize_variable_values(self.trainable_weights)
+            
+        # If _eval_epoch_iterator exists, delete it after all epochs are done.
+        if getattr(self, "_eval_epoch_iterator", None) is not None:
+            del self._eval_epoch_iterator
+        callbacks.on_train_end(logs=training_logs)
+        return self.history
 
     @traceback_utils.filter_traceback
     def predict(
