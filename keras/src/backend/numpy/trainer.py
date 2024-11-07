@@ -1,4 +1,5 @@
 import autograd.numpy as np
+import autograd
 
 from keras.src import backend
 from keras.src import callbacks as callbacks_module
@@ -93,13 +94,150 @@ class NumpyTrainer(base_trainer.Trainer):
 
         self.predict_function = predict_step
     
+    def compute_loss_and_updates(
+        self,
+        trainable_variables,
+        non_trainable_variables,
+        metrics_variables,
+        x,
+        y,
+        sample_weight,
+        training=False,
+        optimizer_variables=None,
+    ):
+        """This method is stateless and is intended for use with autograd.grad."""
+        kwargs = {}
+        if self._call_has_training_arg:
+            kwargs["training"] = training
+            
+        # Run stateless forward pass
+        y_pred, non_trainable_variables, losses = self.stateless_call(
+            trainable_variables,
+            non_trainable_variables,
+            x,
+            return_losses=True,
+            **kwargs,
+        )
+        if losses:
+            # Make forward pass losses available to compute_loss.
+            self._losses_override.clear()
+            self._losses_override = losses
+        
+        loss, variables = self.stateless_compute_loss(
+            trainable_variables,
+            non_trainable_variables,
+            metrics_variables,
+            x=x,
+            y=y,
+            y_pred=y_pred,
+            sample_weight=sample_weight,
+            training=training,
+        )
+        if losses:
+            self._losses_override.clear()
+        (trainable_variables, non_trainable_variables, metrics_variables) = (
+            variables
+        )
+        
+        # Handle loss scaling
+        unscaled_loss = loss
+        if training and self.optimizer is not None:
+            # Scale loss with a StatelessScope, to use an update scale variable.
+            mapping = list(zip(self.optimizer.variables, optimizer_variables))
+            with backend.StatelessScope(state_mapping=mapping):
+                loss = self.optimizer.scale_loss(loss)
+        return loss, (
+            unscaled_loss,
+            y_pred,
+            non_trainable_variables,
+            metrics_variables,
+        )
+
     
     def train_step(self, data):
         x, y, sample_weight = data_adapter_utils.unpack_x_y_sample_weight(data)
         
-        # TODO: train step
+        grad_fn = autograd.grad_and_aux(self.compute_loss_and_updates)
         
-        return None
+        # Unefficient way to get values
+        trainable_variables = [v.value for v in self.trainable_variables]
+        non_trainable_variables = [v.value for v in self.non_trainable_variables]
+        optimizer_variables = [v.value for v in self.optimizer.variables]
+        metrics_variables = [v.value for v in self.metrics_variables]
+        
+        grads, aux = grad_fn(
+            trainable_variables,
+            non_trainable_variables,
+            metrics_variables,
+            x,
+            y,
+            sample_weight,
+            training=True,
+            optimizer_variables=optimizer_variables
+        )
+
+        # TODO: get gradients, aux and loss in one call
+        loss = self.compute_loss_and_updates(
+            trainable_variables,
+            non_trainable_variables,
+            metrics_variables,
+            x,
+            y,
+            sample_weight,
+            training=True,
+            optimizer_variables=optimizer_variables
+        )
+        
+        (unscaled_loss, y_pred, non_trainable_variables, metrics_variables) = (
+            aux
+        )
+        
+        (
+            trainable_variables,
+            optimizer_variables,
+        ) = self.optimizer.stateless_apply(
+            optimizer_variables, grads, trainable_variables
+        )
+        
+        # Synchronize trained variables
+        for ref_v, v in zip(self.trainable_variables, trainable_variables):
+            ref_v.assign(v)
+        for ref_v, v in zip(self.non_trainable_variables, non_trainable_variables):
+            ref_v.assign(v)
+        for ref_v, v in zip(self.optimizer.variables, optimizer_variables):
+            ref_v.assign(v)
+        for ref_v, v in zip(self.metrics_variables, metrics_variables):
+            ref_v.assign(v)
+        
+        with backend.StatelessScope(
+            state_mapping=[
+                (ref_v, v)
+                for ref_v, v in zip(self.metrics_variables, metrics_variables)
+            ]
+        ) as scope:
+            self._loss_tracker.update_state(
+                unscaled_loss, sample_weight=tree.flatten(x)[0].shape[0]
+            )
+            logs = self.compute_metrics(x, y, y_pred, sample_weight)
+
+        new_metrics_variables = []
+        for ref_v in self.metrics_variables:
+            new_v = scope.get_current_value(ref_v)
+            if new_v is None:
+                new_v = ref_v.value
+            # TODO: why arraybox?
+            if isinstance(new_v, np.numpy_boxes.ArrayBox):
+                new_v = new_v._value
+            new_metrics_variables.append(new_v)
+        metrics_variables = new_metrics_variables
+        
+        new_logs = {}
+        for key, value in logs.items():
+            if isinstance(value, np.numpy_boxes.ArrayBox):
+                value = value._value
+            new_logs[key] = value
+        
+        return new_logs
     
     def make_train_function(self, force=False):
         if self.train_function is not None and not force:
@@ -243,7 +381,7 @@ class NumpyTrainer(base_trainer.Trainer):
                 }
                 epoch_logs.update(val_logs)
             
-            callbacks.on_epoch_end()
+            callbacks.on_epoch_end(epoch, epoch_logs)
             training_logs = epoch_logs
             if self.stop_training:
                 break

@@ -4,6 +4,7 @@ import functools
 import warnings
 
 import autograd.numpy as np
+from autograd.builtins import isinstance
 import numpy
 
 from keras.src import tree
