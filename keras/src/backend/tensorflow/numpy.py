@@ -39,7 +39,7 @@ def add(x1, x2):
     # Special case of `tf.add`: `tf.nn.bias_add`
     # `BiasAdd` can be fused with `MatMul` and `Conv*` kernels
     # Expecting `x1` to be `inputs` and `x2` to be `bias` (no swapping)
-    x2_squeeze_shape = [d for d in x2.shape if d is None or d > 1]
+    x2_squeeze_shape = [d for d in x2.shape.as_list() if d is None or d > 1]
     if (
         # `x2` looks like bias (can be squeezed to vector)
         1 == len(x2_squeeze_shape)
@@ -1239,6 +1239,15 @@ def exp(x):
     return tf.exp(x)
 
 
+@sparse.densifying_unary(1)
+def exp2(x):
+    x = convert_to_tensor(x)
+    ori_dtype = standardize_dtype(x.dtype)
+    if "int" in ori_dtype or ori_dtype == "bool":
+        x = tf.cast(x, config.floatx())
+    return tf.math.pow(2.0, x)
+
+
 def expand_dims(x, axis):
     x = convert_to_tensor(x)
     axis = to_tuple_or_list(axis)
@@ -1799,7 +1808,8 @@ def _quantile(x, q, axis=None, method="linear", keepdims=False):
         nan_batch_members = tf.reshape(
             nan_batch_members, shape=right_rank_matched_shape
         )
-        gathered_y = tf.where(nan_batch_members, float("NaN"), gathered_y)
+        nan_value = tf.constant(float("NaN"), dtype=x.dtype)
+        gathered_y = tf.where(nan_batch_members, nan_value, gathered_y)
 
     # Expand dimensions if requested
     if keepdims:
